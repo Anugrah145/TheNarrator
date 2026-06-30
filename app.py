@@ -155,6 +155,9 @@ class StorytellerNode(NodeBase):
         response = self.llm.invoke([SystemMessage(content=prompt)])
         new_scene = response.content.strip()
         
+        # Generate Audio
+        audio_bytes = asyncio.run(self.generate_audio(new_scene, voice))
+        
         new_history = history + [
             {"role": "player", "content": user_input, "audio": None},
             {"role": "dm", "content": new_scene, "audio": audio_bytes}
