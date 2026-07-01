@@ -1,6 +1,7 @@
 import os
 import typing
 import streamlit as st
+import streamlit.components.v1 as components
 from typing import List, TypedDict, Literal
 from langgraph.graph import StateGraph, END
 from langchain_groq import ChatGroq
@@ -12,6 +13,9 @@ import base64
 from supabase import create_client, Client
 import json
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- Constants & Config ---
 MODEL_NAME = "llama-3.3-70b-versatile"
@@ -34,48 +38,80 @@ class GameState(TypedDict):
 class NodeBase:
     def __init__(self, llm: ChatGroq):
         self.llm = llm
-        
-    def save_story_to_db(self, state: GameState):
+
+    @staticmethod
+    def get_supabase_client():
+        """Get Supabase client, resolving credentials from env or Streamlit secrets."""
         url = os.environ.get("SUPABASE_URL")
         key = os.environ.get("SUPABASE_KEY")
-        
-        # Try to get from secrets if not in env
+
+        # Fallback to Streamlit secrets (for Streamlit Cloud deployment)
         if not url:
             try: url = st.secrets.get("SUPABASE_URL")
             except: pass
         if not key:
             try: key = st.secrets.get("SUPABASE_KEY")
             except: pass
-            
-        if not url or not key:
-            print("Supabase credentials not found. Skipping save.")
-            return
 
+        if not url or not key:
+            return None
+
+        return create_client(url, key)
+
+    @staticmethod
+    def create_story(session_id, secret_ending, genre, narration_style):
+        """Insert a new story row. Returns the story UUID or None on failure."""
         try:
-            supabase: Client = create_client(url, key)
-            
-            # Prepare data
-            # Remove audio bytes from history before saving to JSON to save space
-            clean_history = []
-            for entry in state["story_history"]:
-                clean_entry = entry.copy()
-                if "audio" in clean_entry:
-                    del clean_entry["audio"]
-                clean_history.append(clean_entry)
-            
+            client = NodeBase.get_supabase_client()
+            if not client:
+                print("Supabase credentials not found. Skipping save.")
+                return None
             data = {
-                "created_at": datetime.now().isoformat(),
-                "genre": state["genre"],
-                "narration_style": state["narration_style"],
-                "secret_ending": state["secret_ending"],
-                "history": clean_history,
-                "triggered_ending": state["is_game_over"]
+                "session_id": session_id,
+                "secret_ending": secret_ending,
+                "genre": genre,
+                "narration_style": narration_style,
             }
-            
-            supabase.table("stories").insert(data).execute()
-            print("Story saved to database!")
+            result = client.table("stories").insert(data).execute()
+            story_id = result.data[0]["id"]
+            print(f"Story created: {story_id}")
+            return story_id
         except Exception as e:
-            print(f"Failed to save story: {e}")
+            print(f"Failed to create story: {e}")
+            return None
+
+    @staticmethod
+    def save_action(story_id, action_order, role, content):
+        """Insert a single action into story_actions."""
+        if not story_id:
+            return
+        try:
+            client = NodeBase.get_supabase_client()
+            if not client:
+                return
+            data = {
+                "story_id": story_id,
+                "action_order": action_order,
+                "role": role,
+                "content": content,
+            }
+            client.table("story_actions").insert(data).execute()
+        except Exception as e:
+            print(f"Failed to save action: {e}")
+
+    @staticmethod
+    def mark_game_over(story_id):
+        """Set is_game_over = true on the story row."""
+        if not story_id:
+            return
+        try:
+            client = NodeBase.get_supabase_client()
+            if not client:
+                return
+            client.table("stories").update({"is_game_over": True}).eq("id", story_id).execute()
+            print(f"Story {story_id} marked as game over.")
+        except Exception as e:
+            print(f"Failed to mark game over: {e}")
 
     async def generate_audio(self, text: str, voice: str = "en-GB-SoniaNeural") -> bytes:
         try:
@@ -118,13 +154,20 @@ class SetupNode(NodeBase):
         # Generate Audio
         audio_bytes = asyncio.run(self.generate_audio(opening_scene, voice))
 
+        # --- Persist to DB ---
+        session_id = st.session_state.get("session_id", "unknown")
+        story_id = self.create_story(session_id, secret_ending, genre, style)
+        st.session_state.story_id = story_id
+        st.session_state.action_order = 1
+        self.save_action(story_id, 1, "dm", opening_scene)
+
         return {
             "secret_ending": secret_ending,
             "current_scene": opening_scene,
             "story_history": [{"role": "dm", "content": opening_scene, "audio": audio_bytes}],
             "is_game_over": False,
-            "user_input": "", # Reset input
-            "audio_data": b"" # Deprecated, keeping for compatibility if needed, but history has it now
+            "user_input": "",
+            "audio_data": b""
         }
 
 class StorytellerNode(NodeBase):
@@ -157,12 +200,21 @@ class StorytellerNode(NodeBase):
         
         # Generate Audio
         audio_bytes = asyncio.run(self.generate_audio(new_scene, voice))
-        
+
+        # --- Persist to DB ---
+        story_id = st.session_state.get("story_id")
+        order = st.session_state.get("action_order", 1)
+        order += 1
+        self.save_action(story_id, order, "player", user_input)
+        order += 1
+        self.save_action(story_id, order, "dm", new_scene)
+        st.session_state.action_order = order
+
         new_history = history + [
             {"role": "player", "content": user_input, "audio": None},
             {"role": "dm", "content": new_scene, "audio": audio_bytes}
         ]
-        
+
         return {
             "current_scene": new_scene,
             "story_history": new_history,
@@ -187,9 +239,9 @@ class JudgeNode(NodeBase):
         is_game_over = "YES" in response.content.strip().upper()
         
         if is_game_over:
-            # Save to DB
-            self.save_story_to_db(state)
-        
+            story_id = st.session_state.get("story_id")
+            self.mark_game_over(story_id)
+
         return {"is_game_over": is_game_over}
 
 class GuideNode(NodeBase):
@@ -270,6 +322,14 @@ def main():
     .stButton>button { width: 100%; border-radius: 10px; height: 3em; background-color: #2e2e2e; color: white; }
     .stButton>button:hover { background-color: #4e4e4e; color: #00ff00; }
     .chat-container { background-color: #1e1e1e; padding: 20px; border-radius: 15px; margin-bottom: 20px; }
+    .story-loader { display: flex; align-items: center; gap: 10px; font-size: 1rem; color: #d3d3d3; margin-bottom: 10px; }
+    .story-loader .loader-dot { width: 10px; height: 10px; border-radius: 50%; background: #00ff00; animation: pulse 1s ease-in-out infinite; }
+    .story-loader .loader-dot:nth-child(2) { animation-delay: 0.2s; }
+    .story-loader .loader-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 0.4; }
+        50% { transform: scale(1.5); opacity: 1; }
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -307,13 +367,24 @@ def main():
         
         voice_options = {
             "British Female": "en-GB-SoniaNeural",
-            "US Male": "en-US-ChristopherNeural",
+            "British Male": "en-GB-RyanNeural",
             "US Female": "en-US-AriaNeural",
+            "US Male": "en-US-ChristopherNeural",
             "Australian Female": "en-AU-NatashaNeural",
-            "Indian Female": "en-IN-NeerjaNeural"
+            "Australian Male": "en-AU-WilliamNeural",
+            "Indian Female": "en-IN-NeerjaNeural",
+            "Indian Male": "en-IN-PrabhatNeural",
+            "Childlike Voice": "en-US-JennyNeural",
+            "Comforting Voice": "en-US-AmberNeural",
+            "Passionate Voice": "en-US-GuyNeural",
+            "Funny Cartoon Voice": "en-US-JessaNeural"
         }
         selected_voice_name = st.selectbox("Narrator Voice", list(voice_options.keys()))
         narrator_voice = voice_options[selected_voice_name]
+        
+        st.markdown("---")
+        custom_genre = st.text_input("Or type your own genre")
+        custom_style = st.text_input("Or type your own narration style")
         
         mute_audio = st.checkbox("Mute Narrator", value=False)
         
@@ -348,20 +419,36 @@ def main():
 
     if "game_state" not in st.session_state:
         st.session_state.game_state = None
+    if "session_id" not in st.session_state:
+        import uuid
+        st.session_state.session_id = str(uuid.uuid4())
 
-    if start_btn and genres:
+    selected_genre = ", ".join(genres) if genres else ""
+    if custom_genre:
+        selected_genre = custom_genre.strip()
+
+    selected_style = narration_style
+    if custom_style:
+        selected_style = custom_style.strip()
+
+    if start_btn and selected_genre:
         initial_state = GameState(
-            genre=", ".join(genres),
+            genre=selected_genre,
             story_history=[],
             current_scene="",
             secret_ending="",
             suggested_options=[],
             user_input="",
             is_game_over=False,
-            narration_style=narration_style,
+            narration_style=selected_style,
             audio_data=b"",
             narrator_voice=narrator_voice
         )
+        st.markdown(
+            "<div class='story-loader'>The storyteller pauses, ink poised and ready to reveal the first scene...<span class='loader-dot'></span><span class='loader-dot'></span><span class='loader-dot'></span></div>",
+            unsafe_allow_html=True
+        )
+        # with st.spinner("The storyteller pauses, ink poised and ready to reveal the first scene..."):
         result = st.session_state.graph.invoke(initial_state)
         st.session_state.game_state = result
         st.rerun()
@@ -383,16 +470,35 @@ def main():
                     with st.chat_message("assistant"):
                         st.write(content)
                         if audio and not mute_audio:
-                            # Custom Audio Player
+                            # Custom Audio Player using st.iframe and a data URI
                             b64_audio = base64.b64encode(audio).decode()
-                            audio_html = f"""
-                                <audio id="audio_{i}" src="data:audio/mp3;base64,{b64_audio}"></audio>
-                                <div style="display: flex; gap: 10px; margin-top: 5px;">
-                                    <button onclick="document.getElementById('audio_{i}').play()" style="border:none; background:none; cursor:pointer; font-size: 20px;">▶️</button>
-                                    <button onclick="document.getElementById('audio_{i}').pause()" style="border:none; background:none; cursor:pointer; font-size: 20px;">⏸️</button>
-                                </div>
-                            """
-                            st.markdown(audio_html, unsafe_allow_html=True)
+                            audio_html = """
+                                <html>
+                                <head>
+                                    <meta charset=\"utf-8\" />
+                                </head>
+                                <body style=\"margin:0; padding:0;\">
+                                    <audio id=\"audio_{i}\" src=\"data:audio/mp3;base64,{b64_audio}\"></audio>
+                                    <button id=\"toggle_{i}\" type=\"button\" style=\"all:unset; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px; border-radius:50%; background:#111; color:#ffffff; border:1px solid rgba(255,255,255,0.16); font-size:18px; transition:background 0.2s;\">&#9654;</button>
+                                    <script>
+                                        const audio = document.getElementById('audio_{i}');
+                                        const button = document.getElementById('toggle_{i}');
+                                        button.onclick = () => {{
+                                            if (audio.paused) {{
+                                                audio.play();
+                                                button.textContent = '\u23F8';
+                                            }} else {{
+                                                audio.pause();
+                                                button.textContent = '\u25B6';
+                                            }}
+                                        }};
+                                        audio.onended = () => {{ button.textContent = '\u25B6'; }};
+                                    </script>
+                                </body>
+                                </html>
+                            """.format(b64_audio=b64_audio, i=i)
+                            b64_html = base64.b64encode(audio_html.encode('utf-8')).decode()
+                            st.iframe(f"data:text/html;charset=utf-8;base64,{b64_html}", height=75)
 
         if state["is_game_over"]:
             st.balloons()
@@ -428,6 +534,11 @@ def main():
             current_state["narration_style"] = narration_style
             current_state["narrator_voice"] = narrator_voice
             
+            st.markdown(
+                "<div class='story-loader'>The narrator leans in, considering the next twist...<span class='loader-dot'></span><span class='loader-dot'></span><span class='loader-dot'></span></div>",
+                unsafe_allow_html=True
+            )
+            # with st.spinner("The narrator leans in, considering the next twist..."):
             result = st.session_state.graph.invoke(current_state)
             st.session_state.game_state = result
             st.rerun()

@@ -4,3 +4,4 @@ langchain-groq
 langchain-core
 edge-tts
 supabase
+python-dotenv
