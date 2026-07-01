@@ -1,7 +1,6 @@
 import os
 import typing
 import streamlit as st
-import streamlit.components.v1 as components
 from typing import List, TypedDict, Literal
 from langgraph.graph import StateGraph, END
 from langchain_groq import ChatGroq
@@ -23,6 +22,7 @@ MODEL_NAME = "llama-3.3-70b-versatile"
 # --- State Management ---
 class GameState(TypedDict):
     genre: str
+    storyteller_name: str
     story_history: List[dict] # Changed to list of dicts: {"role": str, "content": str, "audio": bytes}
     current_scene: str
     secret_ending: str
@@ -330,65 +330,97 @@ def main():
         0%, 100% { transform: scale(1); opacity: 0.4; }
         50% { transform: scale(1.5); opacity: 1; }
     }
+    .hero-card { background: #111; padding: 20px; border-radius: 18px; margin-bottom: 20px; color: #f2f2f2; }
+    .hero-card h2 { margin: 0 0 10px; font-size: 1.6rem; }
+    .hero-card p { margin: 0; line-height: 1.5; color: #bfbfbf; }
+    .mobile-setup > div { margin-bottom: 16px; }
+    .mobile-setup label { font-weight: 600; margin-bottom: 6px; display: block; }
+    .mobile-setup .stTextInput>div>div>input,
+    .mobile-setup .stSelectbox>div>div>div>div>div>div { width: 100% !important; }
+    @media (max-width: 768px) {
+        .css-1d391kg { padding: 16px; }
+    }
     </style>
     """, unsafe_allow_html=True)
 
     st.title("♾️ Infinite Narrative Adventure")
     st.caption("Powered by LangGraph & Llama3-70b")
 
-    with st.sidebar:
-        st.header("Configuration")
-        api_key = os.environ.get("GROQ_API_KEY")
-        if not api_key:
-            try:
-                api_key = st.secrets.get("GROQ_API_KEY")
-            except FileNotFoundError:
-                pass
-        
-        if not api_key:
-            api_key = st.text_input("Enter Groq API Key", type="password")
-        
-        if not api_key:
-            st.warning("Please enter a Groq API Key to start.")
-            return
+    st.markdown(
+        """
+        <div class='hero-card'>
+            <h2>Start your next adventure</h2>
+            <p>Become the storyteller, choose a mood, and let the narrative unfold.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        st.header("Game Setup")
-        genres = st.multiselect(
-            "Select Genres (Max 2)",
-            ["Fantasy", "Sci-Fi", "Horror", "Cyberpunk", "Comedy", "Mystery", "Western"],
-            max_selections=2
-        )
-        
-        narration_style = st.selectbox(
-            "Narration Style",
-            ["Standard", "Shakespearean", "Noir Detective", "Children's Book", "Rhyming Couplets", 
-             "Cyberpunk Slang", "High Fantasy", "Pirate", "Scientific Report", "Gossip Columnist"]
-        )
-        
-        voice_options = {
-            "British Female": "en-GB-SoniaNeural",
-            "British Male": "en-GB-RyanNeural",
-            "US Female": "en-US-AriaNeural",
-            "US Male": "en-US-ChristopherNeural",
-            "Australian Female": "en-AU-NatashaNeural",
-            "Australian Male": "en-AU-WilliamNeural",
-            "Indian Female": "en-IN-NeerjaNeural",
-            "Indian Male": "en-IN-PrabhatNeural",
-            "Childlike Voice": "en-US-JennyNeural",
-            "Comforting Voice": "en-US-AmberNeural",
-            "Passionate Voice": "en-US-GuyNeural",
-            "Funny Cartoon Voice": "en-US-JessaNeural"
-        }
-        selected_voice_name = st.selectbox("Narrator Voice", list(voice_options.keys()))
-        narrator_voice = voice_options[selected_voice_name]
-        
-        st.markdown("---")
-        custom_genre = st.text_input("Or type your own genre")
-        custom_style = st.text_input("Or type your own narration style")
-        
-        mute_audio = st.checkbox("Mute Narrator", value=False)
-        
-        start_btn = st.button("Start New Game")
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        try:
+            api_key = st.secrets.get("GROQ_API_KEY")
+        except FileNotFoundError:
+            pass
+
+    if not api_key:
+        api_key = st.text_input("Enter Groq API Key", type="password", key="groq_api_key")
+
+    if not api_key:
+        st.warning("Please enter a Groq API Key to start.")
+        return
+
+    storyteller_name = st.text_input(
+        "Your storyteller name",
+        key="storyteller_name",
+        placeholder="e.g. Aria the Bard"
+    )
+    if not storyteller_name:
+        st.warning("A storyteller name is required to begin.")
+
+    st.markdown("### Adventure setup")
+    genres = st.multiselect(
+        "Select Genres (Max 2)",
+        ["Fantasy", "Sci-Fi", "Horror", "Cyberpunk", "Comedy", "Mystery", "Western"],
+        max_selections=2,
+        key="genres"
+    )
+
+    custom_genre = st.text_input("Or type your own genre", key="custom_genre")
+
+    narration_style = st.selectbox(
+        "Narration Style",
+        ["Standard", "Shakespearean", "Noir Detective", "Children's Book", "Rhyming Couplets", 
+         "Cyberpunk Slang", "High Fantasy", "Pirate", "Scientific Report", "Gossip Columnist"],
+        key="narration_style"
+    )
+    custom_style = st.text_input("Or type your own narration style", key="custom_style")
+
+    voice_options = {
+        "British Female": "en-GB-SoniaNeural",
+        "British Male": "en-GB-RyanNeural",
+        "US Female": "en-US-AriaNeural",
+        "US Male": "en-US-ChristopherNeural",
+        "Australian Female": "en-AU-NatashaNeural",
+        "Australian Male": "en-AU-WilliamNeural",
+        "Indian Female": "en-IN-NeerjaNeural",
+        "Indian Male": "en-IN-PrabhatNeural",
+        "Childlike Voice": "en-US-JennyNeural",
+        "Comforting Voice": "en-US-AmberNeural",
+        "Passionate Voice": "en-US-GuyNeural",
+        "Funny Cartoon Voice": "en-US-JessaNeural"
+    }
+    selected_voice_name = st.selectbox("Narrator Voice", list(voice_options.keys()), key="selected_voice_name")
+    narrator_voice = voice_options[selected_voice_name]
+
+    mute_audio = st.checkbox("Mute Narrator", value=False, key="mute_audio")
+
+    st.markdown("---")
+    st.markdown(
+        "**How to begin:** 1) Enter your storyteller name, 2) choose a genre and style, 3) tap Create My Story."
+    )
+
+    start_btn = st.button("Create My Story")
 
     if "graph" not in st.session_state:
         llm = ChatGroq(temperature=0.7, model_name=MODEL_NAME, groq_api_key=api_key)
@@ -431,9 +463,10 @@ def main():
     if custom_style:
         selected_style = custom_style.strip()
 
-    if start_btn and selected_genre:
+    if start_btn and selected_genre and storyteller_name:
         initial_state = GameState(
             genre=selected_genre,
+            storyteller_name=storyteller_name,
             story_history=[],
             current_scene="",
             secret_ending="",
