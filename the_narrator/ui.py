@@ -7,7 +7,7 @@ from .helpers import is_valid_protagonist_description
 def render_styles():
     st.markdown("""
     <style>
-    .stButton>button { width: 100%; border-radius: 10px; height: 3em; background-color: #2e2e2e; color: white; }
+    .stButton>button { width: 100%; border-radius: 10px; min-height: 3em; background-color: #2e2e2e; color: white; white-space: normal; word-break: break-word; text-align: left; padding: 0.9rem 1rem; }
     .stButton>button:hover { background-color: #4e4e4e; color: #00ff00; }
     .chat-container { background-color: #1e1e1e; padding: 20px; border-radius: 15px; margin-bottom: 20px; }
     .story-loader { display: flex; align-items: center; gap: 10px; font-size: 1rem; color: #d3d3d3; margin-bottom: 10px; }
@@ -58,8 +58,7 @@ def render_configuration():
         protagonist_description = st.text_area(
             "Protagonist description (optional)",
             key="protagonist_description",
-            placeholder="Describe the protagonist in a few sentences. Include personality, role, or how they feel.",
-            help="Write only a character description. Do not ask questions, request weather updates, or enter code."
+            placeholder="Describe the protagonist in a few sentences. Include personality, role, or how they feel."
         )
         if protagonist_name:
             summary = protagonist_description.strip() or "No description provided"
@@ -68,9 +67,8 @@ def render_configuration():
                 unsafe_allow_html=True
             )
         if protagonist_description and not is_valid_protagonist_description(protagonist_description):
-            st.error("Invalid description. Please enter only a character description without asking questions or requesting code/weather information.")
+            st.error("Invalid description. Please enter a valid character description.")
             protagonist_description = ""
-        st.session_state.protagonist_description = protagonist_description
         if not storyteller_name:
             st.warning("A storyteller name is required to begin.")
 
@@ -196,5 +194,6 @@ def render_action_panel(state: GameState):
     custom_action = st.text_input("Or type your own action:", key="custom_input")
     if st.button("Submit Custom Action") and custom_action:
         action_taken = custom_action
+        st.session_state.custom_input = ""
 
     return action_taken

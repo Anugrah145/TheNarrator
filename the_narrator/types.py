@@ -15,3 +15,4 @@ class GameState(TypedDict):
     narration_style: str
     audio_data: bytes
     narrator_voice: str
+    session_id: str
