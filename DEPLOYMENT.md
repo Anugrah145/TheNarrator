@@ -17,6 +17,7 @@ CREATE TABLE stories (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   session_id text NOT NULL,
   secret_ending text,
+  storyteller_name text,
   genre text,
   narration_style text,
   is_game_over boolean DEFAULT false,
@@ -35,6 +36,16 @@ CREATE TABLE story_actions (
 
 -- Index for fast lookups by story
 CREATE INDEX idx_story_actions_story_id ON story_actions(story_id);
+
+-- Protagonist table: optional main character profile per story
+CREATE TABLE protagonists (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  story_id uuid REFERENCES stories(id) ON DELETE CASCADE,
+  name text,
+  description text,
+  status jsonb,
+  created_at timestamptz DEFAULT now()
+);
 ```
 
 5.  Go to **Project Settings** -> **API**.
