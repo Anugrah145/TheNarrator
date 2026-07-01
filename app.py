@@ -316,6 +316,8 @@ if __name__ == "__main__":
 # Redefining main for the file content
 def main():
     st.set_page_config(page_title="Infinite Adventure", layout="wide")
+    if "config_expanded" not in st.session_state:
+        st.session_state.config_expanded = True
     
     st.markdown("""
     <style>
@@ -370,57 +372,60 @@ def main():
         st.warning("Please enter a Groq API Key to start.")
         return
 
-    storyteller_name = st.text_input(
-        "Your storyteller name",
-        key="storyteller_name",
-        placeholder="e.g. Aria the Bard"
-    )
-    if not storyteller_name:
-        st.warning("A storyteller name is required to begin.")
+    with st.expander("Configuration", expanded=st.session_state.config_expanded):
+        storyteller_name = st.text_input(
+            "Your storyteller name",
+            key="storyteller_name",
+            placeholder="e.g. Aria the Bard"
+        )
+        if not storyteller_name:
+            st.warning("A storyteller name is required to begin.")
 
-    st.markdown("### Adventure setup")
-    genres = st.multiselect(
-        "Select Genres (Max 2)",
-        ["Fantasy", "Sci-Fi", "Horror", "Cyberpunk", "Comedy", "Mystery", "Western"],
-        max_selections=2,
-        key="genres"
-    )
+        st.markdown("### Adventure setup")
+        genres = st.multiselect(
+            "Select Genres (Max 2)",
+            ["Fantasy", "Sci-Fi", "Horror", "Cyberpunk", "Comedy", "Mystery", "Western"],
+            max_selections=2,
+            key="genres"
+        )
 
-    custom_genre = st.text_input("Or type your own genre", key="custom_genre")
+        custom_genre = st.text_input("Or type your own genre", key="custom_genre")
 
-    narration_style = st.selectbox(
-        "Narration Style",
-        ["Standard", "Shakespearean", "Noir Detective", "Children's Book", "Rhyming Couplets", 
-         "Cyberpunk Slang", "High Fantasy", "Pirate", "Scientific Report", "Gossip Columnist"],
-        key="narration_style"
-    )
-    custom_style = st.text_input("Or type your own narration style", key="custom_style")
+        narration_style = st.selectbox(
+            "Narration Style",
+            ["Standard", "Shakespearean", "Noir Detective", "Children's Book", "Rhyming Couplets", 
+             "Cyberpunk Slang", "High Fantasy", "Pirate", "Scientific Report", "Gossip Columnist"],
+            key="narration_style"
+        )
+        custom_style = st.text_input("Or type your own narration style", key="custom_style")
 
-    voice_options = {
-        "British Female": "en-GB-SoniaNeural",
-        "British Male": "en-GB-RyanNeural",
-        "US Female": "en-US-AriaNeural",
-        "US Male": "en-US-ChristopherNeural",
-        "Australian Female": "en-AU-NatashaNeural",
-        "Australian Male": "en-AU-WilliamNeural",
-        "Indian Female": "en-IN-NeerjaNeural",
-        "Indian Male": "en-IN-PrabhatNeural",
-        "Childlike Voice": "en-US-JennyNeural",
-        "Comforting Voice": "en-US-AmberNeural",
-        "Passionate Voice": "en-US-GuyNeural",
-        "Funny Cartoon Voice": "en-US-JessaNeural"
-    }
-    selected_voice_name = st.selectbox("Narrator Voice", list(voice_options.keys()), key="selected_voice_name")
-    narrator_voice = voice_options[selected_voice_name]
+        voice_options = {
+            "British Female": "en-GB-SoniaNeural",
+            "British Male": "en-GB-RyanNeural",
+            "US Female": "en-US-AriaNeural",
+            "US Male": "en-US-ChristopherNeural",
+            "Australian Female": "en-AU-NatashaNeural",
+            "Australian Male": "en-AU-WilliamNeural",
+            "Indian Female": "en-IN-NeerjaNeural",
+            "Indian Male": "en-IN-PrabhatNeural",
+            "Childlike Voice": "en-US-JennyNeural",
+            "Comforting Voice": "en-US-AmberNeural",
+            "Passionate Voice": "en-US-GuyNeural",
+            "Funny Cartoon Voice": "en-US-JessaNeural"
+        }
+        selected_voice_name = st.selectbox("Narrator Voice", list(voice_options.keys()), key="selected_voice_name")
+        narrator_voice = voice_options[selected_voice_name]
 
-    mute_audio = st.checkbox("Mute Narrator", value=False, key="mute_audio")
+        mute_audio = st.checkbox("Mute Narrator", value=False, key="mute_audio")
 
-    st.markdown("---")
-    st.markdown(
-        "**How to begin:** 1) Enter your storyteller name, 2) choose a genre and style, 3) tap Create My Story."
-    )
+        st.markdown("---")
+        st.markdown(
+            "**How to begin:** 1) Enter your storyteller name, 2) choose a genre and style, 3) tap Create My Story."
+        )
 
-    start_btn = st.button("Create My Story")
+        start_btn = st.button("Create My Story")
+        if start_btn:
+            st.session_state.config_expanded = False
 
     if "graph" not in st.session_state:
         llm = ChatGroq(temperature=0.7, model_name=MODEL_NAME, groq_api_key=api_key)
